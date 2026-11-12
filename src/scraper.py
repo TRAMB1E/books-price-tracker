@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import re
@@ -21,6 +22,7 @@ CHANGES_CSV = DATA_DIR / "price_changes.csv"
 HEADERS = {
     "User-Agent": "StudentPriceTracker/1.0 (educational project)"
 }
+
 RATING_MAP = {
     "One": 1,
     "Two": 2,
@@ -47,26 +49,37 @@ def parse_book_cards(soup: BeautifulSoup, page_url: str) -> list[dict]:
         availability_element = card.select_one(".availability")
         rating_element = card.select_one("p.star-rating")
 
-        if not all([title_link, price_element, availability_element, rating_element]):
+        if not all([
+            title_link,
+            price_element,
+            availability_element,
+            rating_element,
+        ]):
             continue
 
         relative_link = title_link.get("href", "")
+
         rating_class = next(
-            (name for name in rating_element.get("class", []) if name in RATING_MAP),
+            (
+                name
+                for name in rating_element.get("class", [])
+                if name in RATING_MAP
+            ),
             None,
         )
 
+        # Extract the numeric price, even if the currency symbol is misencoded.
         price_text = price_element.get_text(strip=True)
-price_match = re.search(r"\d+(?:\.\d+)?", price_text)
+        price_match = re.search(r"\d+(?:\.\d+)?", price_text)
 
-if not price_match:
-    raise ValueError(f"Не удалось распознать цену: {price_text!r}")
+        if not price_match:
+            raise ValueError(f"Не удалось распознать цену: {price_text!r}")
 
-price_gbp = float(price_match.group())
+        price_gbp = float(price_match.group())
 
-books.append({
-    "title": title_link.get("title") or title_link.get_text(strip=True),
-    "price_gbp": price_gbp,
+        books.append({
+            "title": title_link.get("title") or title_link.get_text(strip=True),
+            "price_gbp": price_gbp,
             "rating": RATING_MAP.get(rating_class, 0),
             "availability": " ".join(availability_element.stripped_strings),
             "url": urljoin(page_url, relative_link),
@@ -84,23 +97,30 @@ def scrape_catalog() -> pd.DataFrame:
     with requests.Session() as session:
         while page_url:
             print(f"Загружаю страницу {page_number}: {page_url}")
+
             soup = get_soup(session, page_url)
             books = parse_book_cards(soup, page_url)
             all_books.extend(books)
 
             next_link = soup.select_one("li.next a")
-            page_url = urljoin(page_url, next_link["href"]) if next_link else None
+            page_url = (
+                urljoin(page_url, next_link["href"])
+                if next_link
+                else None
+            )
             page_number += 1
 
-            # Small delay between requests.
             if page_url:
                 time.sleep(1)
 
     if not all_books:
-        raise RuntimeError("Не удалось найти товары. Проверьте доступность сайта и HTML.")
+        raise RuntimeError(
+            "Не удалось найти товары. Проверьте доступность сайта и HTML."
+        )
 
     df = pd.DataFrame(all_books)
     df = df.drop_duplicates(subset=["url"]).reset_index(drop=True)
+
     return df
 
 
@@ -116,9 +136,12 @@ def init_database(connection: sqlite3.Connection) -> None:
             observed_at TEXT NOT NULL
         )
     """)
+
     connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_price_history_url ON price_history(url)"
+        "CREATE INDEX IF NOT EXISTS idx_price_history_url "
+        "ON price_history(url)"
     )
+
     connection.commit()
 
 
@@ -128,7 +151,7 @@ def save_and_compare(df: pd.DataFrame) -> None:
     with sqlite3.connect(DB_PATH) as connection:
         init_database(connection)
 
-        # Take the latest previous price for each product BEFORE inserting this run.
+        # Get the previous price before inserting this run.
         previous = pd.read_sql_query("""
             SELECT h.url, h.price_gbp AS previous_price
             FROM price_history h
@@ -152,16 +175,33 @@ def save_and_compare(df: pd.DataFrame) -> None:
 
         if previous.empty:
             changes = pd.DataFrame(columns=[
-                "title", "previous_price", "current_price",
-                "change_gbp", "url"
+                "title",
+                "previous_price",
+                "current_price",
+                "change_gbp",
+                "url",
             ])
         else:
             changes = current.merge(previous, on="url", how="inner")
-            changes = changes[changes["price_gbp"] != changes["previous_price"]].copy()
-            changes = changes.rename(columns={"price_gbp": "current_price"})
-            changes["change_gbp"] = changes["current_price"] - changes["previous_price"]
+
+            changes = changes[
+                changes["price_gbp"] != changes["previous_price"]
+            ].copy()
+
+            changes = changes.rename(
+                columns={"price_gbp": "current_price"}
+            )
+
+            changes["change_gbp"] = (
+                changes["current_price"] - changes["previous_price"]
+            )
+
             changes = changes[[
-                "title", "previous_price", "current_price", "change_gbp", "url"
+                "title",
+                "previous_price",
+                "current_price",
+                "change_gbp",
+                "url",
             ]]
 
     df.to_csv(PRODUCTS_CSV, index=False, encoding="utf-8-sig")
@@ -181,9 +221,11 @@ def main() -> int:
         products = scrape_catalog()
         save_and_compare(products)
         return 0
+
     except requests.RequestException as error:
         print(f"Ошибка HTTP-запроса: {error}", file=sys.stderr)
         return 1
+
     except Exception as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         return 1
