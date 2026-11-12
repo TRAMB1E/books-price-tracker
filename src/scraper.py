@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 import sys
 import time
@@ -55,11 +56,17 @@ def parse_book_cards(soup: BeautifulSoup, page_url: str) -> list[dict]:
             None,
         )
 
-        price_text = price_element.get_text(strip=True).replace("£", "").strip()
+        price_text = price_element.get_text(strip=True)
+price_match = re.search(r"\d+(?:\.\d+)?", price_text)
 
-        books.append({
-            "title": title_link.get("title") or title_link.get_text(strip=True),
-            "price_gbp": float(price_text),
+if not price_match:
+    raise ValueError(f"Не удалось распознать цену: {price_text!r}")
+
+price_gbp = float(price_match.group())
+
+books.append({
+    "title": title_link.get("title") or title_link.get_text(strip=True),
+    "price_gbp": price_gbp,
             "rating": RATING_MAP.get(rating_class, 0),
             "availability": " ".join(availability_element.stripped_strings),
             "url": urljoin(page_url, relative_link),
